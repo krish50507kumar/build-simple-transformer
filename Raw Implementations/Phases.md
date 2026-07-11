@@ -10,7 +10,7 @@
 
 
 
-This builds intuition because I'll see every matrix multiplication yourself.
+This builds intuition because I'll see every matrix multiplication myself.
 
 
 
