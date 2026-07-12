@@ -158,6 +158,58 @@ decode([3, 6], id_to_token)
 
 ---
 
+## Byte-level fallback (upgrade from character-level)
+
+**The problem it solves:** character-level BPE can only tokenize characters it saw during training. Feed it an unseen script (emoji, Japanese, accented letters not in the corpus) and those characters have no symbol at all — they fall back to an `<unk>`/`-1` placeholder, and the original information is lost.
+
+**The fix:** use raw UTF-8 **bytes** as the base vocabulary instead of characters. Every character in every language decomposes into 1–4 bytes from a fixed set of 256 possible values, so nothing is ever truly unrepresentable.
+
+### `word_to_byte_symbols(word: str) -> tuple`
+Same job as `word_to_symbols`, but breaks a word into its raw UTF-8 **bytes** (each a single-byte `bytes` object) instead of characters. The end-of-word marker is also stored as `bytes` (`b'</w>'`), not a string, so it can be concatenated with the other symbols during merging.
+
+**Input:**
+```python
+"café"
+```
+**Output:**
+```python
+(b'c', b'a', b'f', b'\xc3', b'\xa9', b'</w>')
+```
+Note `'é'` takes 2 bytes (`\xc3\xa9`) — byte length isn't always the same as character length.
+
+**Why not a digit-string like `'99'` for each byte?** Tried that first — it breaks because merging two digit-strings (e.g. `'108'` + `'111'` → `'108111'`) is ambiguous to reverse: there's no way to know if that was originally `108, 111` or `1, 0, 8, 111`, etc. Raw `bytes` objects avoid this entirely — concatenation is always losslessly reversible because Python tracks exact byte boundaries, no parsing needed.
+
+**Everything downstream is unchanged** — `get_pair_counts`, `merge_pair`, `train_bpe`, `encode_word`, `build_vocab`, `encode` all operate generically on "symbols" and don't care whether a symbol is a `str` or a `bytes` object.
+
+**Input:**
+```python
+encode_word("日本語", merges_bytes)   # never seen in training
+```
+**Output:**
+```python
+(b'\xe6', b'\x97', b'\xa5', b'\xe6', b'\x9c', b'\xac', b'\xe8', b'\xaa', b'\x9e', b'</w>')
+```
+9 bytes (3 per CJK character) — nothing dropped, nothing unknown, just falls back to individual bytes when no merge rule applies.
+
+---
+
+### `decode_bytes(ids: list[int], id_to_token: dict) -> str`
+Reverses byte-level `encode`: looks up each id's `bytes` object, joins them all into **one** combined `bytes` object first, replaces the `b'</w>'` marker with a space, then calls `.decode('utf-8')` **once** at the very end.
+
+**Input:**
+```python
+ids = encode("héllo", merges_bytes, token_to_id_b)
+decode_bytes(ids, id_to_token_b)
+```
+**Output:**
+```python
+"héllo "
+```
+
+**Why decode once, at the end, instead of per-token?** A multi-byte character's bytes (like `é` → `\xc3\xa9`) can end up split across two separate tokens. Decoding a lone `\xc3` by itself would crash (`UnicodeDecodeError`) since it's only half a character. Joining *all* bytes first guarantees every multi-byte character's pieces are back together, in order, before decoding is attempted.
+
+---
+
 ## Pipeline at a glance
 
 ```
@@ -173,5 +225,5 @@ corpus
 
 ## Known gaps (extensions to explore)
 - **Efficiency**: pair counts are recomputed from scratch every merge — should update incrementally instead.
-- **Byte-level fallback**: unseen characters currently map to `-1` (unknown) — starting from raw bytes avoids this entirely.
+- ~~**Byte-level fallback**~~ — done. See "Byte-level fallback" section above (`word_to_byte_symbols`, `decode_bytes`).
 - **Pre-tokenization regex**: no handling yet for punctuation/contraction boundaries before BPE runs.
