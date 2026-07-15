@@ -132,7 +132,7 @@ def create_ffn_weights(embedding_dim: int, hidden_dim: int) -> tuple:
     W1 = np.random.randn(embedding_dim, hidden_dim)
     W2 = np.random.randn(hidden_dim, embedding_dim)
     b1= np.zeros(hidden_dim,)
-    b2= np.ones(embedding_dim,)
+    b2= np.zeros(embedding_dim,)
     return W1,b1,W2,b2
 def feed_forward(X: np.ndarray, W1: np.ndarray, b1: np.ndarray, W2: np.ndarray, b2: np.ndarray) -> np.ndarray:
     return np.maximum(X @ W1 + b1,0)@ W2 + b2
